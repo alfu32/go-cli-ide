@@ -1,43 +1,45 @@
 package app
 
 import (
-	fmt "fmt"
-	"math"
+	"fmt"
+	"ide-tui/app/components"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
+type tabItem struct{ title string }
+
+func (i tabItem) Title() string       { return i.title }
+func (i tabItem) Description() string { return "" }
+func (i tabItem) FilterValue() string { return i.title }
+
 type VerticalTabs struct {
 	width      int
 	height     int
 	active     int
-	order      []string
+	intent     int
+	tabNames   []string
 	panels     map[string]tea.Model
 	_tab_width int
+	style      components.StyleSheet
 }
 
-func NewVerticalTabs(order []string, panels map[string]tea.Model) VerticalTabs {
-	return VerticalTabs{
-		width:      28,
+func NewVerticalTabs(tabNames []string, panels map[string]tea.Model) VerticalTabs {
+	vtabs := VerticalTabs{
+		width:      40,
 		height:     20,
-		order:      order,  // []string{},                 // []string{"Project", "Git", "Database", "Requests"},
-		panels:     panels, // make(map[string]tea.Model), // make(map[string]tea.Model),
-		_tab_width: 10,
+		tabNames:   tabNames, // []string{},                 // []string{"Project", "Git", "Database", "Requests"},
+		panels:     panels,   // make(map[string]tea.Model), // make(map[string]tea.Model),
+		_tab_width: 5,
+		intent:     -1,
 	}
+	vtabs.style = components.NewStyleSheet()
+	return vtabs
 }
 func (m VerticalTabs) GetWidth() int {
-	return m.width + m._tab_width
-}
-func (m VerticalTabs) SetPanels(order []string, panels map[string]tea.Model) VerticalTabs {
-	var maxLabel = 0
-	for _, name := range m.order {
-		maxLabel = int(math.Max(float64(maxLabel), float64((len(name)))))
-	}
-	m._tab_width = maxLabel
-	m.order = order
-	m.panels = panels
-	return m
+	return m.width
 }
 
 func (m VerticalTabs) Init() tea.Cmd { return nil }
@@ -48,13 +50,24 @@ func (m VerticalTabs) Update(msg tea.Msg) (VerticalTabs, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up":
-			m.active = (m.active - 1 + len(m.order)) % len(m.order)
+			m.active = (m.active - 1 + len(m.tabNames)) % len(m.tabNames)
 		case "down":
-			m.active = (m.active + 1) % len(m.order)
+			m.active = (m.active + 1) % len(m.tabNames)
+		}
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if msg.X < m._tab_width && (msg.Y) < len(m.tabNames)*3 {
+				m.active = msg.Y / 3
+			}
+		}
+		if msg.X < m._tab_width && (msg.Y) < len(m.tabNames)*3 {
+			m.intent = msg.Y / 3 // len(m.tabNames)
+		} else {
+			m.intent = -1
 		}
 	}
 
-	activeName := m.order[m.active]
+	activeName := m.tabNames[m.active]
 	if activePanel, ok := m.panels[activeName]; ok {
 		updated, c := activePanel.Update(msg)
 		m.panels[activeName] = updated
@@ -66,27 +79,31 @@ func (m VerticalTabs) Update(msg tea.Msg) (VerticalTabs, tea.Cmd) {
 
 func (m VerticalTabs) View() string {
 	// Tabs list
-	var body string
-	for i, name := range m.order {
-		prefix := "  "
-		if i == m.active {
-			prefix = "> "
+	// Build tab list with proper styles
+	var lines []string
+	for i, name := range m.tabNames {
+		text := fmt.Sprintf("%4s\n%4s \n%4s", " ", name, " ") //"+      +\n  " + name + "   \n+      +"
+		switch {
+		case i == m.active:
+			lines = append(lines, m.style.Focused.Render(text))
+		case i == m.intent:
+			lines = append(lines, m.style.Hovered.Render(text))
+		default:
+			lines = append(lines, m.style.Visible.Render(text))
 		}
-		body += fmt.Sprintf("%s%s\n", prefix, name)
 	}
 
 	list := lipgloss.NewStyle().
-		MarginTop(2).
-		Width(m._tab_width - 2).
-		Height(m.height - 2).
-		BorderForeground(lipgloss.Color("8")).
-		Render(body)
+		Width(m._tab_width).
+		Height(m.height).
+		Padding(1, 0, 0, 0).
+		Render(strings.Join(lines, "\n"))
 	var panelView string
-	if len(m.order) == 0 {
+	if len(m.tabNames) == 0 {
 		panelView = "[No panel loaded]"
 	} else {
 		// Active panel content
-		activeName := m.order[m.active]
+		activeName := m.tabNames[m.active]
 		if p, ok := m.panels[activeName]; ok {
 			panelView = p.View()
 		} else {
@@ -95,13 +112,18 @@ func (m VerticalTabs) View() string {
 	}
 
 	// Layout
+
 	panelStyle := lipgloss.NewStyle().
 		Height(m.height).
-		Width(m.width - m._tab_width).
-		// Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")) //.
-	//Padding(1, 2)
+		Width(m.width - m._tab_width - 1)
 
-	joined := lipgloss.JoinHorizontal(lipgloss.Top, list, panelStyle.Render(panelView))
-	return joined
+	// Join list and panel side by side
+	sep := components.NewVerticalSeparator()
+	sep.Height = m.height
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		list,
+		sep.View(),
+		panelStyle.Render(panelView),
+	)
 }

@@ -1,9 +1,10 @@
 package components
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"time"
 )
 
 type Alert struct {
@@ -11,6 +12,7 @@ type Alert struct {
 	Visible  bool
 	duration time.Duration
 	timer    *time.Timer
+	hasFocus bool
 }
 
 type alertShowMsg struct {
@@ -19,6 +21,10 @@ type alertShowMsg struct {
 
 func NewAlert() *Alert {
 	return &Alert{duration: 3 * time.Second}
+}
+
+func (a Alert) Focus(value bool) {
+	a.hasFocus = value
 }
 
 // --- External call (imperative) ---
@@ -30,7 +36,7 @@ func (a *Alert) Show(text string) tea.Cmd {
 
 func (a *Alert) Init() tea.Cmd { return nil }
 
-func (a *Alert) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (a *Alert) Update(msg tea.Msg) (*Alert, tea.Cmd) {
 	switch msg := msg.(type) {
 	case alertShowMsg:
 		a.Text = msg.Text

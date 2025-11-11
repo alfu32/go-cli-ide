@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"ide-tui/app/components"
 	"ide-tui/app/panels"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -13,32 +14,28 @@ type Application struct {
 	tabs       VerticalTabs
 	editor     CodeEditor
 	separator  components.VerticalSeparator
+	alert      *components.Alert
 	width      int
 	height     int
 	dragging   bool
 	dragStartX int
 	mouseX     int
-	alert      *components.Alert
 	x          int
 	y          int
 }
 
 func New() Application {
 	alert := components.NewAlert()
+	tabKeys := strings.Split("Prj,Git,DBa,RQs", ",")
+	tabs := map[string]tea.Model{
+		"Prj": panels.NewProjectPanel(),
+		"Git": panels.NewGitPanel(),
+		"DBa": panels.NewDatabasePanel(),
+		"RQs": panels.NewRequestsPanel(),
+	}
+	tab := NewVerticalTabs(tabKeys, tabs)
 	return Application{
-		tabs: NewVerticalTabs(
-			[]string{
-				"Prj",
-				"Git",
-				"DBa",
-				"RQs",
-			},
-			map[string]tea.Model{
-				"Prj": panels.NewProjectPanel(),
-				"Git": panels.NewGitPanel(),
-				"DBa": panels.NewDatabasePanel(),
-				"RQs": panels.NewRequestsPanel(),
-			}),
+		tabs:      tab,
 		editor:    NewCodeEditor(),
 		separator: components.NewVerticalSeparator(),
 		alert:     alert,
@@ -49,7 +46,10 @@ func (a Application) Init() tea.Cmd { return nil }
 
 func (a Application) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	_, _ = a.alert.Update(msg)
+	a.alert, _ = a.alert.Update(msg)
+	a.tabs, _ = a.tabs.Update(msg)
+	a.editor, _ = a.editor.Update(msg)
+	a.separator, _ = a.separator.Update(msg)
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
@@ -75,13 +75,15 @@ func (a Application) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			// detect click on separator
-			if msg.X == a.tabs.width-2 {
+			if msg.X == a.tabs.width {
 				a.dragging = true
 				a.dragStartX = msg.X
+				a.separator.HasFocus = true
 			}
 		}
 		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
 			a.dragging = false
+			a.separator.HasFocus = false
 		}
 		if a.dragging && msg.Action == tea.MouseActionMotion && msg.Button == tea.MouseButtonLeft {
 			delta := msg.X - a.dragStartX
@@ -96,10 +98,7 @@ func (a Application) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.x = msg.X
 		a.y = msg.Y
-
-	default:
-		a.tabs, cmd = a.tabs.Update(msg)
-		a.editor, _ = a.editor.Update(msg)
+		// a.separator.IsHovered = (msg.X == a.tabs.width)
 	}
 
 	return a, cmd
@@ -108,12 +107,25 @@ func (a Application) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a Application) View() string {
 	tabsView := a.tabs.View()
 	editorView := a.editor.View()
+	a.separator.IsHovered = (a.x == a.tabs.width)
 	sep := a.separator.View()
+	statusText := fmt.Sprintf("x:%d y;%d dragging: %t", a.x, a.y, a.dragging)
+	statusText = fmt.Sprintf("%s startX:%d tabs.width:%d", statusText, a.dragStartX, a.tabs.width)
+	statusText = fmt.Sprintf("%s sep.hover:%t sep.focus:%t", statusText, a.separator.IsHovered, a.separator.HasFocus)
 	bottom := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("7")).
 		Background(lipgloss.Color("8")).
 		Width(a.width).
-		Render(fmt.Sprintf("x:%d y;%d dragging: %t startx:%d tabs.width:%d", a.x, a.y, a.dragging, a.dragStartX, a.tabs.width))
+		Render(statusText)
 
-	return lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, tabsView, sep, editorView), bottom)
+	main := lipgloss.JoinHorizontal(lipgloss.Top, tabsView, sep, editorView)
+	base := lipgloss.JoinVertical(lipgloss.Left, main, bottom)
+	if a.alert.Visible {
+		return lipgloss.Place(
+			a.width, a.height,
+			lipgloss.Center, lipgloss.Top,
+			a.alert.View(),
+		) + "\n" + base
+	}
+	return base
 }
